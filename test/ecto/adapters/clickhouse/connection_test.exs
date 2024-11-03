@@ -117,17 +117,17 @@ defmodule Ecto.Adapters.ClickHouse.ConnectionTest do
 
   test "from" do
     query = Schema |> select([r], r.x)
-    assert all(query) == ~s[SELECT s0."x" FROM "schema" AS s0]
+    assert all(query) == ~s[SELECT s0.x FROM schema AS s0]
   end
 
   test "from with hints" do
     # With string
     query = Schema |> from(hints: "USE INDEX FOO") |> select([r], r.x)
-    assert all(query) == ~s{SELECT s0."x" FROM "schema" AS s0 USE INDEX FOO}
+    assert all(query) == ~s{SELECT s0.x FROM schema AS s0 USE INDEX FOO}
 
     # With list of strings
     query = Schema |> from(hints: ["INDEXED BY FOO", "INDEXED BY BAR"]) |> select([r], r.x)
-    assert all(query) == ~s[SELECT s0."x" FROM "schema" AS s0 INDEXED BY FOO INDEXED BY BAR]
+    assert all(query) == ~s[SELECT s0.x FROM schema AS s0 INDEXED BY FOO INDEXED BY BAR]
   end
 
   # TODO merge with test above once ecto 3.10.4 is released
@@ -146,16 +146,16 @@ defmodule Ecto.Adapters.ClickHouse.ConnectionTest do
 
   test "from without schema" do
     query = "posts" |> select([r], r.x)
-    assert all(query) == ~s[SELECT p0."x" FROM "posts" AS p0]
+    assert all(query) == ~s[SELECT p0.x FROM posts AS p0]
 
     # query = "posts" |> select([r], fragment("?", r))
     # assert all(query) == ~s[SELECT p0 FROM "posts" AS p0]
 
     query = "Posts" |> select([r], r.x)
-    assert all(query) == ~s[SELECT P0."x" FROM "Posts" AS P0]
+    assert all(query) == ~s[SELECT P0.x FROM Posts AS P0]
 
     query = "0posts" |> select([:x])
-    assert all(query) == ~s{SELECT t0."x" FROM "0posts" AS t0}
+    assert all(query) == ~s{SELECT t0.x FROM 0posts AS t0}
   end
 
   test "from with subquery" do
@@ -166,8 +166,8 @@ defmodule Ecto.Adapters.ClickHouse.ConnectionTest do
       |> select([r], r.x)
 
     assert all(query) == """
-           SELECT s0."x" \
-           FROM (SELECT sp0."x" AS "x",sp0."y" AS "y" FROM "posts" AS sp0) AS s0\
+           SELECT s0.x \
+           FROM (SELECT sp0.x AS x, sp0.y AS y FROM posts AS sp0) AS s0\
            """
 
     query =
@@ -177,8 +177,8 @@ defmodule Ecto.Adapters.ClickHouse.ConnectionTest do
       |> select([r], r)
 
     assert all(query) == """
-           SELECT s0."x",s0."z" \
-           FROM (SELECT sp0."x" AS "x",sp0."y" AS "z" FROM "posts" AS sp0) AS s0\
+           SELECT s0.x,s0.z \
+           FROM (SELECT sp0.x AS x, sp0.y AS z FROM posts AS sp0) AS s0\
            """
 
     query =
@@ -190,12 +190,12 @@ defmodule Ecto.Adapters.ClickHouse.ConnectionTest do
       |> select([r], r)
 
     assert all(query) == """
-           SELECT s0."x",s0."z" \
+           SELECT s0.x, s0.z \
            FROM (\
-           SELECT ss0."x" AS "x",ss0."z" AS "z" \
+           SELECT ss0.x AS x, ss0.z AS z \
            FROM (\
-           SELECT ssp0."x" AS "x",ssp0."y" AS "z" \
-           FROM "posts" AS ssp0\
+           SELECT ssp0.x AS x, ssp0.y AS z \
+           FROM posts AS ssp0\
            ) AS ss0\
            ) AS s0\
            """
@@ -222,14 +222,14 @@ defmodule Ecto.Adapters.ClickHouse.ConnectionTest do
 
     assert all(query) ==
              """
-             WITH RECURSIVE "tree" AS \
-             (SELECT sc0."id" AS "id",1 AS "depth" FROM "categories" AS sc0 WHERE (isNull(sc0."parent_id")) \
+             WITH RECURSIVE tree AS \
+             (SELECT sc0.id AS id, 1 AS depth FROM categories AS sc0 WHERE (isNull(sc0.parent_id)) \
              UNION ALL \
-             (SELECT c0."id",t1."depth" + 1 FROM "categories" AS c0 \
-             INNER JOIN "tree" AS t1 ON t1."id" = c0."parent_id")) \
-             SELECT s0."x",t1."id",CAST(t1."depth" AS Int64) \
-             FROM "schema" AS s0 \
-             INNER JOIN "tree" AS t1 ON t1."id" = s0."category_id"\
+             (SELECT c0.id, t1.depth + 1 FROM categories AS c0 \
+             INNER JOIN tree AS t1 ON t1.id = c0.parent_id)) \
+             SELECT s0.x, t1.id,CAST(t1.depth AS Int64) \
+             FROM schema AS s0 \
+             INNER JOIN tree AS t1 ON t1.id = s0.category_id\
              """
   end
 
@@ -256,16 +256,16 @@ defmodule Ecto.Adapters.ClickHouse.ConnectionTest do
 
     assert all(query) ==
              """
-             WITH "comments_scope" AS (\
-             SELECT sc0."entity_id" AS "entity_id",sc0."text" AS "text" \
-             FROM "comments" AS sc0 WHERE (isNull(sc0."deleted_at"))) \
-             SELECT p0."title",c1."text" \
-             FROM "posts" AS p0 \
-             INNER JOIN "comments_scope" AS c1 ON c1."entity_id" = p0."guid" \
+             WITH comments_scope AS (\
+             SELECT sc0.entity_id AS entity_id, sc0.text AS text \
+             FROM comments AS sc0 WHERE (isNull(sc0.deleted_at))) \
+             SELECT p0.title, c1.text \
+             FROM posts AS p0 \
+             INNER JOIN comments_scope AS c1 ON c1.entity_id = p0.guid \
              UNION ALL \
-             (SELECT v0."title",c1."text" \
-             FROM "videos" AS v0 \
-             INNER JOIN "comments_scope" AS c1 ON c1."entity_id" = v0."guid")\
+             (SELECT v0.title, c1.text \
+             FROM videos AS v0 \
+             INNER JOIN comments_scope AS c1 ON c1.entity_id = v0.guid)\
              """
   end
 
@@ -285,10 +285,10 @@ defmodule Ecto.Adapters.ClickHouse.ConnectionTest do
 
     assert all(query) ==
              """
-             WITH RECURSIVE "tree" AS (#{@raw_sql_cte}) \
-             SELECT s0."x" \
-             FROM "schema" AS s0 \
-             INNER JOIN "tree" AS t1 ON t1."id" = s0."category_id"\
+             WITH RECURSIVE tree AS (#{@raw_sql_cte}) \
+             SELECT s0.x \
+             FROM schema AS s0 \
+             INNER JOIN tree AS t1 ON t1.id = s0.category_id\
              """
   end
 
@@ -326,59 +326,59 @@ defmodule Ecto.Adapters.ClickHouse.ConnectionTest do
 
   test "select" do
     query = Schema |> select([r], {r.x, r.y})
-    assert all(query) == ~s[SELECT s0."x",s0."y" FROM "schema" AS s0]
+    assert all(query) == ~s[SELECT s0.x, s0.y FROM schema AS s0]
 
     query = Schema |> select([r], [r.x, r.y])
-    assert all(query) == ~s[SELECT s0."x",s0."y" FROM "schema" AS s0]
+    assert all(query) == ~s[SELECT s0.x, s0.y FROM schema AS s0]
 
     query = Schema |> select([r], struct(r, [:x, :y]))
-    assert all(query) == ~s[SELECT s0."x",s0."y" FROM "schema" AS s0]
+    assert all(query) == ~s[SELECT s0.x, s0.y FROM schema AS s0]
   end
 
   test "aggregates" do
     query = Schema |> select(count())
-    assert all(query) == ~S[SELECT count(*) FROM "schema" AS s0]
+    assert all(query) == ~S[SELECT count(*) FROM schema AS s0]
 
     query = Schema |> select([s], count(s.x))
-    assert all(query) == ~S[SELECT count(s0."x") FROM "schema" AS s0]
+    assert all(query) == ~S[SELECT count(s0.x) FROM schema AS s0]
 
     query = Schema |> select([s], count(s.x, :distinct))
-    assert all(query) == ~S[SELECT countDistinct(s0."x") FROM "schema" AS s0]
+    assert all(query) == ~S[SELECT countDistinct(s0.x) FROM schema AS s0]
   end
 
   test "aggregate filters" do
     query = Schema |> select([r], count(r.x) |> filter(r.x > 10))
-    assert all(query) == ~s[SELECT count(s0."x") FILTER (WHERE s0."x" > 10) FROM "schema" AS s0]
+    assert all(query) == ~s[SELECT count(s0.x) FILTER (WHERE s0.x > 10) FROM schema AS s0]
 
     query = Schema |> select([r], count(r.x) |> filter(r.x > 10 and r.x < 50))
 
     assert all(query) ==
-             ~s[SELECT count(s0."x") FILTER (WHERE (s0."x" > 10) AND (s0."x" < 50)) FROM "schema" AS s0]
+             ~s[SELECT count(s0.x) FILTER (WHERE (s0.x > 10) AND (s0.x < 50)) FROM schema AS s0]
 
     query = Schema |> select([r], count() |> filter(r.x > 10))
-    assert all(query) == ~s[SELECT count(*) FILTER (WHERE s0."x" > 10) FROM "schema" AS s0]
+    assert all(query) == ~s[SELECT count(*) FILTER (WHERE s0.x > 10) FROM schema AS s0]
   end
 
   test "distinct" do
     query = Schema |> distinct([r], true) |> select([r], {r.x, r.y})
-    assert all(query) == ~s[SELECT DISTINCT s0."x",s0."y" FROM "schema" AS s0]
+    assert all(query) == ~s[SELECT DISTINCT s0.x, s0.y FROM schema AS s0]
 
     query = Schema |> distinct([r], false) |> select([r], {r.x, r.y})
-    assert all(query) == ~s[SELECT s0."x",s0."y" FROM "schema" AS s0]
+    assert all(query) == ~s[SELECT s0.x, s0.y FROM schema AS s0]
 
     query = Schema |> distinct(true) |> select([r], {r.x, r.y})
-    assert all(query) == ~s[SELECT DISTINCT s0."x",s0."y" FROM "schema" AS s0]
+    assert all(query) == ~s[SELECT DISTINCT s0.x, s0.y FROM schema AS s0]
 
     query = Schema |> distinct(false) |> select([r], {r.x, r.y})
-    assert all(query) == ~s[SELECT s0."x",s0."y" FROM "schema" AS s0]
+    assert all(query) == ~s[SELECT s0.x, s0.y FROM schema AS s0]
 
     query = Schema |> distinct([r], [r.x, r.y]) |> select([r], {r.x, r.y})
-    assert all(query) == ~s[SELECT DISTINCT ON (s0."x",s0."y") s0."x",s0."y" FROM "schema" AS s0]
+    assert all(query) == ~s[SELECT DISTINCT ON (s0.x, s0.y) s0.x, s0.y FROM schema AS s0]
   end
 
   test "coalesce" do
     query = Schema |> select([s], coalesce(s.x, 5))
-    assert all(query) == ~s[SELECT coalesce(s0."x",5) FROM "schema" AS s0]
+    assert all(query) == ~s[SELECT coalesce(s0.x, 5) FROM schema AS s0]
   end
 
   test "where" do
@@ -389,16 +389,16 @@ defmodule Ecto.Adapters.ClickHouse.ConnectionTest do
       |> select([r], r.x)
 
     assert all(query) ==
-             ~s[SELECT s0."x" FROM "schema" AS s0 WHERE (s0."x" = 42) AND (s0."y" != 43)]
+             ~s[SELECT s0.x FROM schema AS s0 WHERE (s0.x = 42) AND (s0.y != 43)]
 
     query = Schema |> where([r], {r.x, r.y} > {1, 2}) |> select([r], r.x)
-    assert all(query) == ~s[SELECT s0."x" FROM "schema" AS s0 WHERE ((s0."x",s0."y") > (1,2))]
+    assert all(query) == ~s[SELECT s0.x FROM schema AS s0 WHERE ((s0.x, s0.y) > (1, 2))]
   end
 
   test "where with big AND chain gets many parens" do
     assert all(from e in "events", where: true and true and true and true and true, select: true) ==
              """
-             SELECT true FROM "events" AS e0 WHERE ((((1 AND 1) AND 1) AND 1) AND 1)\
+             SELECT true FROM events AS e0 WHERE ((((1 AND 1) AND 1) AND 1) AND 1)\
              """
   end
 
@@ -412,7 +412,7 @@ defmodule Ecto.Adapters.ClickHouse.ConnectionTest do
                where: true,
                select: true
            ) == """
-           SELECT true FROM "events" AS e0 WHERE (1) AND (1) AND (1) AND (1) AND (1)\
+           SELECT true FROM events AS e0 WHERE (1) AND (1) AND (1) AND (1) AND (1)\
            """
   end
 

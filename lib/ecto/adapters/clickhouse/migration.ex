@@ -268,7 +268,7 @@ defmodule Ecto.Adapters.ClickHouse.Migration do
 
   defp comment(%Table{} = table) do
     if comment = table.comment do
-      [" COMMENT ", @conn.quote_name(comment, ?')]
+      [" COMMENT '", @conn.escape_string(comment), ?']
     else
       []
     end

@@ -137,28 +137,34 @@ defmodule Ecto.Adapters.ClickHouse.Connection do
         update_op(op, quote_name(key), value, sources, params, query)
       end
 
-    Enum.intersperse(fields, ?,)
+    Enum.intersperse(fields, ", ")
   end
 
   defp update_op(:set, quoted_key, value, sources, params, query) do
-    [quoted_key, ?= | expr(value, sources, params, query)]
+    [quoted_key, " = " | expr(value, sources, params, query)]
   end
 
   defp update_op(:inc, quoted_key, value, sources, params, query) do
-    [quoted_key, ?=, quoted_key, ?+ | expr(value, sources, params, query)]
+    [quoted_key, " = ", quoted_key, " + " | expr(value, sources, params, query)]
   end
 
   defp update_op(:push, quoted_key, value, sources, params, query) do
-    [quoted_key, ?=, "arrayPushBack(", quoted_key, ?,, expr(value, sources, params, query), ?)]
+    [
+      quoted_key,
+      " = arrayPushBack(",
+      quoted_key,
+      ", ",
+      expr(value, sources, params, query),
+      ?)
+    ]
   end
 
   defp update_op(:pull, quoted_key, value, sources, params, query) do
     [
       quoted_key,
-      ?=,
-      "arrayFilter(x->x!=",
+      " = arrayFilter(x->x!=",
       expr(value, sources, params, query),
-      ?,,
+      ", ",
       quoted_key,
       ?)
     ]
@@ -231,7 +237,7 @@ defmodule Ecto.Adapters.ClickHouse.Connection do
           ["INSERT INTO " | quote_table(prefix, table)]
 
         _not_empty ->
-          fields = [?(, intersperse_map(header, ?,, &quote_name/1), ?)]
+          fields = [?(, intersperse_map(header, ", ", &quote_name/1), ?)]
           ["INSERT INTO ", quote_table(prefix, table) | fields]
       end
 
@@ -327,7 +333,7 @@ defmodule Ecto.Adapters.ClickHouse.Connection do
   defp select_fields([], _sources, _params, _query), do: "true"
 
   defp select_fields(fields, sources, params, query) do
-    intersperse_map(fields, ?,, fn
+    intersperse_map(fields, ", ", fn
       # TODO raise
       # this is useful in array joins lie
       #
@@ -354,7 +360,7 @@ defmodule Ecto.Adapters.ClickHouse.Connection do
   defp distinct(%{expr: exprs}, sources, params, query) when is_list(exprs) do
     [
       "DISTINCT ON (",
-      intersperse_map(exprs, ?,, &order_by_expr(&1, sources, params, query)) | ") "
+      intersperse_map(exprs, ", ", &order_by_expr(&1, sources, params, query)) | ") "
     ]
   end
 
@@ -371,7 +377,7 @@ defmodule Ecto.Adapters.ClickHouse.Connection do
     recursive_opt = if recursive, do: "RECURSIVE ", else: ""
 
     ctes =
-      intersperse_map(queries, ?,, fn {name, _opts, cte} ->
+      intersperse_map(queries, ", ", fn {name, _opts, cte} ->
         [quote_name(name), " AS ", cte_query(cte, sources, params, query)]
       end)
 
@@ -468,8 +474,8 @@ defmodule Ecto.Adapters.ClickHouse.Connection do
   defp group_by(%{group_bys: group_bys} = query, sources, params) do
     [
       " GROUP BY "
-      | intersperse_map(group_bys, ?,, fn %ByExpr{expr: expr} ->
-          intersperse_map(expr, ?,, &expr(&1, sources, params, query))
+      | intersperse_map(group_bys, ", ", fn %ByExpr{expr: expr} ->
+          intersperse_map(expr, ", ", &expr(&1, sources, params, query))
         end)
     ]
   end
@@ -479,7 +485,7 @@ defmodule Ecto.Adapters.ClickHouse.Connection do
   defp window(%{windows: windows} = query, sources, params) do
     [
       " WINDOW "
-      | intersperse_map(windows, ?,, fn {name, %{expr: kw}} ->
+      | intersperse_map(windows, ", ", fn {name, %{expr: kw}} ->
           [quote_name(name), " AS " | window_exprs(kw, sources, params, query)]
         end)
     ]
@@ -494,11 +500,11 @@ defmodule Ecto.Adapters.ClickHouse.Connection do
   end
 
   defp window_expr({:partition_by, fields}, sources, params, query) do
-    ["PARTITION BY " | intersperse_map(fields, ?,, &expr(&1, sources, params, query))]
+    ["PARTITION BY " | intersperse_map(fields, ", ", &expr(&1, sources, params, query))]
   end
 
   defp window_expr({:order_by, fields}, sources, params, query) do
-    ["ORDER BY " | intersperse_map(fields, ?,, &order_by_expr(&1, sources, params, query))]
+    ["ORDER BY " | intersperse_map(fields, ", ", &order_by_expr(&1, sources, params, query))]
   end
 
   defp window_expr({:frame, {:fragment, _, _} = fragment}, sources, params, query) do
@@ -510,8 +516,8 @@ defmodule Ecto.Adapters.ClickHouse.Connection do
   defp order_by(%{order_bys: order_bys} = query, sources, params) do
     [
       " ORDER BY "
-      | intersperse_map(order_bys, ?,, fn %{expr: expr} ->
-          intersperse_map(expr, ?,, &order_by_expr(&1, sources, params, query))
+      | intersperse_map(order_bys, ", ", fn %{expr: expr} ->
+          intersperse_map(expr, ", ", &order_by_expr(&1, sources, params, query))
         end)
     ]
   end
@@ -667,13 +673,13 @@ defmodule Ecto.Adapters.ClickHouse.Connection do
             "#{inspect(name)} you desire"
     end
 
-    intersperse_map(fields, ?,, &[name, ?. | quote_name(&1)])
+    intersperse_map(fields, ", ", &[name, ?. | quote_name(&1)])
   end
 
   defp expr({:in, _, [_left, []]}, _sources, _params, _query), do: "0"
 
   defp expr({:in, _, [left, right]}, sources, params, query) when is_list(right) do
-    args = intersperse_map(right, ?,, &expr(&1, sources, params, query))
+    args = intersperse_map(right, ", ", &expr(&1, sources, params, query))
     [expr(left, sources, params, query), " IN (", args, ?)]
   end
 
@@ -752,7 +758,7 @@ defmodule Ecto.Adapters.ClickHouse.Connection do
   end
 
   defp expr({:{}, _, elems}, sources, params, query) do
-    [?(, intersperse_map(elems, ?,, &expr(&1, sources, params, query)), ?)]
+    [?(, intersperse_map(elems, ", ", &expr(&1, sources, params, query)), ?)]
   end
 
   defp expr({:count, _, []}, _sources, _params, _query), do: "count(*)"
@@ -809,12 +815,12 @@ defmodule Ecto.Adapters.ClickHouse.Connection do
         ]
 
       {:fun, fun} ->
-        [fun, ?(, intersperse_map(args, ?,, &expr(&1, sources, params, query)), ?)]
+        [fun, ?(, intersperse_map(args, ", ", &expr(&1, sources, params, query)), ?)]
     end
   end
 
   defp expr(list, sources, params, query) when is_list(list) do
-    [?[, intersperse_map(list, ?,, &expr(&1, sources, params, query)), ?]]
+    [?[, intersperse_map(list, ", ", &expr(&1, sources, params, query)), ?]]
   end
 
   defp expr(%Decimal{} = decimal, _sources, _params, _query) do
@@ -920,29 +926,47 @@ defmodule Ecto.Adapters.ClickHouse.Connection do
 
   @doc false
   def build_params(ix, len, params) when len > 1 do
-    [build_param(ix, Enum.at(params, ix)), ?, | build_params(ix + 1, len - 1, params)]
+    [build_param(ix, Enum.at(params, ix)), ", " | build_params(ix + 1, len - 1, params)]
   end
 
   def build_params(ix, _len = 1, params), do: build_param(ix, Enum.at(params, ix))
   def build_params(_ix, _len = 0, _params), do: []
 
   @doc false
-  def quote_name(name, quoter \\ ?")
-  def quote_name(nil, _), do: []
+  def quote_name(name)
+  def quote_name(nil), do: []
 
-  def quote_name(names, quoter) when is_list(names) do
-    names
-    |> Enum.reject(&is_nil/1)
-    |> intersperse_map(?., &quote_name(&1, nil))
-    |> wrap_in(quoter)
+  def quote_name(segments) when is_list(segments) do
+    [
+      ?`,
+      segments
+      |> Enum.reject(&is_nil/1)
+      |> intersperse_map(?., &escape_name(&1)),
+      ?`
+    ]
   end
 
-  def quote_name(name, quoter) when is_atom(name) do
-    name |> Atom.to_string() |> quote_name(quoter)
+  def quote_name(name) when is_atom(name) do
+    name |> Atom.to_string() |> quote_name()
   end
 
-  def quote_name(name, quoter) do
-    wrap_in(name, quoter)
+  # TODO faster
+  # TODO test against ClickHouse
+  def quote_name(name) when is_binary(name) do
+    if String.contains?(name, ["`", "\"", "\\"]) do
+      [?`, escape_name(name), ?`]
+    else
+      name
+    end
+  end
+
+  @compile inline: [escape_name: 1]
+  defp escape_name(name) when is_atom(name) do
+    name |> Atom.to_string() |> escape_name()
+  end
+
+  defp escape_name(name) when is_binary(name) do
+    :binary.replace(name, "`", "``", [:global])
   end
 
   defp quote_qualified_name(name, sources, ix) do
@@ -958,9 +982,6 @@ defmodule Ecto.Adapters.ClickHouse.Connection do
   def quote_table(prefix, name)
   def quote_table(nil, name), do: quote_name(name)
   def quote_table(prefix, name), do: [quote_name(prefix), ?., quote_name(name)]
-
-  defp wrap_in(value, nil), do: value
-  defp wrap_in(value, wrapper), do: [wrapper, value, wrapper]
 
   @doc false
   # TODO faster?
@@ -1081,11 +1102,11 @@ defmodule Ecto.Adapters.ClickHouse.Connection do
   defp inline_param(%Decimal{} = dec), do: Decimal.to_string(dec, :normal)
 
   defp inline_param(a) when is_list(a) do
-    [?[, Enum.map_intersperse(a, ?,, &inline_param/1), ?]]
+    [?[, Enum.map_intersperse(a, ", ", &inline_param/1), ?]]
   end
 
   defp inline_param(t) when is_tuple(t) do
-    [?(, t |> Tuple.to_list() |> Enum.map_intersperse(?,, &inline_param/1), ?)]
+    [?(, t |> Tuple.to_list() |> Enum.map_intersperse(", ", &inline_param/1), ?)]
   end
 
   defp inline_param(%s{}) do
@@ -1095,8 +1116,8 @@ defmodule Ecto.Adapters.ClickHouse.Connection do
   defp inline_param(m) when is_map(m) do
     [
       "map(",
-      Enum.map_intersperse(m, ?,, fn {k, v} ->
-        [inline_param(k), ?,, inline_param(v)]
+      Enum.map_intersperse(m, ", ", fn {k, v} ->
+        [inline_param(k), ", ", inline_param(v)]
       end),
       ?)
     ]
@@ -1154,7 +1175,7 @@ defmodule Ecto.Adapters.ClickHouse.Connection do
       [k | _] ->
         # TODO check whole list
         [v | _] = Map.values(m)
-        ["Map(", param_type(k), ?,, param_type(v), ?)]
+        ["Map(", param_type(k), ", ", param_type(v), ?)]
 
       [] ->
         "Map(Nothing,Nothing)"
