@@ -298,8 +298,6 @@ defmodule Ecto.Adapters.ClickHouse.Connection do
     -: " - ",
     *: " * ",
     /: " / ",
-    and: " AND ",
-    or: " OR ",
     # TODO ilike()
     ilike: " ILIKE ",
     # TODO like()
@@ -595,17 +593,22 @@ defmodule Ecto.Adapters.ClickHouse.Connection do
 
   defp boolean(_name, [], _sources, _params, _query), do: []
 
+  defp boolean(name, [%{expr: expr}], sources, params, query) do
+    [name | maybe_paren_expr(expr, sources, params, query)]
+  end
+
   defp boolean(name, [%{expr: expr, op: op} | exprs], sources, params, query) do
-    result =
-      Enum.reduce(exprs, {op, paren_expr(expr, sources, params, query)}, fn
+    {_last_op, result} =
+      Enum.reduce(exprs, {op, maybe_paren_expr(expr, sources, params, query)}, fn
         %BooleanExpr{expr: expr, op: op}, {op, acc} ->
-          {op, [acc, operator_to_boolean(op) | paren_expr(expr, sources, params, query)]}
+          {op, [acc, operator_to_boolean(op) | logical_expr(op, expr, sources, params, query)]}
 
         %BooleanExpr{expr: expr, op: op}, {_, acc} ->
-          {op, [?(, acc, ?), operator_to_boolean(op) | paren_expr(expr, sources, params, query)]}
+          {op,
+           [?(, acc, ?), operator_to_boolean(op) | logical_expr(op, expr, sources, params, query)]}
       end)
 
-    [name | elem(result, 1)]
+    [name | result]
   end
 
   defp operator_to_boolean(:and), do: " AND "
@@ -798,6 +801,14 @@ defmodule Ecto.Adapters.ClickHouse.Connection do
     ["exists" | expr(subquery, sources, params, query)]
   end
 
+  defp expr({op, _, [l, r]}, sources, params, query) when op in [:and, :or] do
+    [
+      logical_expr(op, l, sources, params, query),
+      operator_to_boolean(op),
+      logical_expr(op, r, sources, params, query)
+    ]
+  end
+
   defp expr({fun, _, args}, sources, params, query) when is_atom(fun) and is_list(args) do
     case handle_call(fun, length(args)) do
       {:binary_op, op} ->
@@ -850,6 +861,29 @@ defmodule Ecto.Adapters.ClickHouse.Connection do
     raise Ecto.QueryError,
       query: query,
       message: "unsupported expression #{inspect(expr)}"
+  end
+
+  defp logical_expr(parent_op, expr, sources, params, query) do
+    case expr do
+      {^parent_op, _, [l, r]} ->
+        [
+          logical_expr(parent_op, l, sources, params, query),
+          operator_to_boolean(parent_op),
+          logical_expr(parent_op, r, sources, params, query)
+        ]
+
+      {op, _, [l, r]} when op in [:and, :or] ->
+        [
+          ?(,
+          logical_expr(op, l, sources, params, query),
+          operator_to_boolean(op),
+          logical_expr(op, r, sources, params, query),
+          ?)
+        ]
+
+      _ ->
+        maybe_paren_expr(expr, sources, params, query)
+    end
   end
 
   defp maybe_paren_expr({op, _, [_, _]} = expr, sources, params, query) when op in @binary_ops do

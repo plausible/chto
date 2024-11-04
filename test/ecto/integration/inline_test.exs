@@ -53,8 +53,7 @@ defmodule Ecto.Integration.InlineSQLTest do
                """
                WITH \
                "cte1" AS (\
-               SELECT ss0."id" AS "id",true AS "smth" FROM "schema1" AS ss0 \
-               WHERE (1)\
+               SELECT ss0."id" AS "id",true AS "smth" FROM "schema1" AS ss0 WHERE 1\
                ),\
                "cte2" AS (\
                SELECT * FROM schema WHERE 2\
@@ -62,18 +61,16 @@ defmodule Ecto.Integration.InlineSQLTest do
                SELECT s0."id",0 FROM "schema" AS s0 \
                INNER JOIN "schema2" AS s1 ON true \
                INNER JOIN "schema2" AS s2 ON false \
-               WHERE (true) AND (false) \
+               WHERE true AND false \
                GROUP BY 3,4 \
-               HAVING (true) AND (false) \
+               HAVING true AND false \
                ORDER BY 7 \
                LIMIT 8 \
                OFFSET 9 \
                UNION DISTINCT \
-               (SELECT s0."id",true FROM "schema1" AS s0 \
-               WHERE (5)) \
+               (SELECT s0."id",true FROM "schema1" AS s0 WHERE 5) \
                UNION ALL \
-               (SELECT s0."id",false FROM "schema2" AS s0 \
-               WHERE (6))\
+               (SELECT s0."id",false FROM "schema2" AS s0 WHERE 6)\
                """
     end
 

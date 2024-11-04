@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- remove unnecessary parens from generated SQL to avoid hitting TOO_DEEP_RECURSION https://github.com/plausible/ecto_ch/pull/207
+
 ## 0.4.0 (2024-10-15)
 
 - use `UNION DISTINCT` instead of `UNION` for `Ecto.Query.union/2` https://github.com/plausible/ecto_ch/pull/204

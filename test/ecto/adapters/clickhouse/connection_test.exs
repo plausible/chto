@@ -223,7 +223,7 @@ defmodule Ecto.Adapters.ClickHouse.ConnectionTest do
     assert all(query) ==
              """
              WITH RECURSIVE "tree" AS \
-             (SELECT sc0."id" AS "id",1 AS "depth" FROM "categories" AS sc0 WHERE (isNull(sc0."parent_id")) \
+             (SELECT sc0."id" AS "id",1 AS "depth" FROM "categories" AS sc0 WHERE isNull(sc0."parent_id") \
              UNION ALL \
              (SELECT c0."id",t1."depth" + 1 FROM "categories" AS c0 \
              INNER JOIN "tree" AS t1 ON t1."id" = c0."parent_id")) \
@@ -258,7 +258,7 @@ defmodule Ecto.Adapters.ClickHouse.ConnectionTest do
              """
              WITH "comments_scope" AS (\
              SELECT sc0."entity_id" AS "entity_id",sc0."text" AS "text" \
-             FROM "comments" AS sc0 WHERE (isNull(sc0."deleted_at"))) \
+             FROM "comments" AS sc0 WHERE isNull(sc0."deleted_at")) \
              SELECT p0."title",c1."text" \
              FROM "posts" AS p0 \
              INNER JOIN "comments_scope" AS c1 ON c1."entity_id" = p0."guid" \
@@ -395,24 +395,105 @@ defmodule Ecto.Adapters.ClickHouse.ConnectionTest do
     assert all(query) == ~s[SELECT s0."x" FROM "schema" AS s0 WHERE ((s0."x",s0."y") > (1,2))]
   end
 
-  test "where with big AND chain gets many parens" do
-    assert all(from e in "events", where: true and true and true and true and true, select: true) ==
+  test "single where with AND/OR chains" do
+    assert all(
+             from e in "events",
+               where: true and true and true and true and true,
+               select: true
+           ) ==
              """
-             SELECT true FROM "events" AS e0 WHERE ((((1 AND 1) AND 1) AND 1) AND 1)\
+             SELECT true FROM "events" AS e0 WHERE 1 AND 1 AND 1 AND 1 AND 1\
+             """
+
+    assert all(
+             from e in "events",
+               where: true or true or true or true or true,
+               select: true
+           ) ==
+             """
+             SELECT true FROM "events" AS e0 WHERE 1 OR 1 OR 1 OR 1 OR 1\
+             """
+
+    # :) explain syntax select 1 AND 1 AND 1 OR 1 OR 1 OR 1 AND 1 OR 1;
+    # SELECT (1 AND 1 AND 1) OR 1 OR 1 OR (1 AND 1) OR 1
+    assert all(
+             from e in "events",
+               where: (true and true and true) or true or true or (true and true) or true,
+               select: true
+           ) ==
+             """
+             SELECT true FROM "events" AS e0 WHERE (1 AND 1 AND 1) OR 1 OR 1 OR (1 AND 1) OR 1\
+             """
+
+    assert all(
+             from e in "events",
+               where: (true and true and true) or true or true or (true and (true or true)),
+               select: true
+           ) ==
+             """
+             SELECT true FROM "events" AS e0 WHERE (1 AND 1 AND 1) OR 1 OR 1 OR (1 AND (1 OR 1))\
              """
   end
 
-  test "many where clauses get flat AND chain" do
+  test "many where with AND/OR chains" do
     assert all(
              from e in "events",
-               where: true,
-               where: true,
-               where: true,
-               where: true,
-               where: true,
+               where: fragment("1"),
+               where: fragment("2"),
+               where: fragment("3"),
+               where: fragment("4"),
+               where: fragment("5"),
                select: true
            ) == """
-           SELECT true FROM "events" AS e0 WHERE (1) AND (1) AND (1) AND (1) AND (1)\
+           SELECT true FROM "events" AS e0 WHERE 1 AND 2 AND 3 AND 4 AND 5\
+           """
+
+    assert all(
+             from e in "events",
+               or_where: fragment("1"),
+               or_where: fragment("2"),
+               or_where: fragment("3"),
+               or_where: fragment("4"),
+               or_where: fragment("5"),
+               select: true
+           ) == """
+           SELECT true FROM "events" AS e0 WHERE 1 OR 2 OR 3 OR 4 OR 5\
+           """
+
+    # NOTE: when multiple :where/:or_where are used, the order is preserved using parens with left-to-right precedence
+    assert all(
+             from e in "events",
+               where: fragment("1"),
+               where: fragment("2"),
+               where: fragment("3"),
+               or_where: fragment("4"),
+               or_where: fragment("5"),
+               where: fragment("6"),
+               where: fragment("7"),
+               or_where: fragment("8"),
+               select: true
+           ) == """
+           SELECT true FROM "events" AS e0 WHERE (((1 AND 2 AND 3) OR 4 OR 5) AND 6 AND 7) OR 8\
+           """
+  end
+
+  test "many where with AND/OR chains inside" do
+    assert all(
+             from e in "events",
+               where: true and true and true,
+               where: true and true,
+               select: true
+           ) == """
+           SELECT true FROM "events" AS e0 WHERE 1 AND 1 AND 1 AND 1 AND 1\
+           """
+
+    assert all(
+             from e in "events",
+               where: true and true and true,
+               or_where: true and true,
+               select: true
+           ) == """
+           SELECT true FROM "events" AS e0 WHERE (1 AND 1 AND 1) OR (1 AND 1)\
            """
   end
 
@@ -449,16 +530,17 @@ defmodule Ecto.Adapters.ClickHouse.ConnectionTest do
 
     assert all(from e in "events", where: ^dynamic, select: count()) ==
              """
-             SELECT count(*) FROM "events" AS e0 WHERE ((e0."site_id" = {$0:Int64}) AND (e0."timestamp" < {$1:Date}))\
+             SELECT count(*) FROM "events" AS e0 WHERE (e0."site_id" = {$0:Int64}) AND (e0."timestamp" < {$1:Date})\
              """
 
     dynamic = dynamic([e], ^dynamic and e.timestamp >= ^~D[2024-01-01])
 
     assert all(from e in "events", where: ^dynamic, select: count()) ==
              """
-             SELECT count(*) FROM "events" AS e0 WHERE (((e0."site_id" = {$0:Int64}) AND (e0."timestamp" < {$1:Date})) AND (e0."timestamp" >= {$2:Date}))\
+             SELECT count(*) FROM "events" AS e0 WHERE (e0."site_id" = {$0:Int64}) AND (e0."timestamp" < {$1:Date}) AND (e0."timestamp" >= {$2:Date})\
              """
 
+    # imagine:
     # (has_key(t, :"meta.key", ^"content-platform") and
     #    get_by_key(t, :"meta.key", ^"content-platform") in ^["(none)", "web", "app"]) or
     #   (^true and not has_key(t, :"meta.key", ^"content-platform"))
@@ -466,7 +548,11 @@ defmodule Ecto.Adapters.ClickHouse.ConnectionTest do
 
     assert all(from e in "events", where: ^dynamic, select: count()) ==
              """
-             SELECT count(*) FROM "events" AS e0 WHERE ((((e0."site_id" = {$0:Int64}) AND (e0."timestamp" < {$1:Date})) AND (e0."timestamp" >= {$2:Date})) AND ((1 AND 0) OR (1 AND not(1))))\
+             SELECT count(*) FROM "events" AS e0 WHERE \
+             (e0."site_id" = {$0:Int64}) AND \
+             (e0."timestamp" < {$1:Date}) AND \
+             (e0."timestamp" >= {$2:Date}) AND \
+             ((1 AND 0) OR (1 AND not(1)))\
              """
   end
 
@@ -750,7 +836,7 @@ defmodule Ecto.Adapters.ClickHouse.ConnectionTest do
       |> select([r], r.x)
       |> where([], fragment(~s|? = "query\\?"|, ^10))
 
-    assert all(query) == ~s[SELECT s0."x" FROM "schema" AS s0 WHERE ({$0:Int64} = "query?")]
+    assert all(query) == ~s[SELECT s0."x" FROM "schema" AS s0 WHERE {$0:Int64} = "query?"]
 
     value = 13
     query = Schema |> select([r], fragment("lcase(?, ?)", r.x, ^value))
@@ -791,7 +877,7 @@ defmodule Ecto.Adapters.ClickHouse.ConnectionTest do
       |> where(fragment("? = ?", literal(^name), "Main"))
       |> select([], true)
 
-    assert all(query) == ~s|SELECT true FROM "schema" AS s0 WHERE ("y" = 'Main')|
+    assert all(query) == ~s|SELECT true FROM "schema" AS s0 WHERE "y" = 'Main'|
   end
 
   test "selected_as" do
@@ -882,7 +968,7 @@ defmodule Ecto.Adapters.ClickHouse.ConnectionTest do
     query = Schema |> select([e], e.x == ^0 or e.x in ^[1, 2, 3] or e.x == ^4)
 
     assert all(query) ==
-             ~s[SELECT ((s0."x" = {$0:Int64}) OR (s0."x" IN ({$1:Int64},{$2:Int64},{$3:Int64}))) OR (s0."x" = {$4:Int64}) FROM "schema" AS s0]
+             ~s[SELECT (s0."x" = {$0:Int64}) OR (s0."x" IN ({$1:Int64},{$2:Int64},{$3:Int64})) OR (s0."x" = {$4:Int64}) FROM "schema" AS s0]
 
     query = Schema |> select([e], e in [1, 2, 3])
 
@@ -1042,8 +1128,7 @@ defmodule Ecto.Adapters.ClickHouse.ConnectionTest do
              """
              WITH \
              "cte1" AS (\
-             SELECT ss0."id" AS "id",{$0:Bool} AS "smth" FROM "schema1" AS ss0 \
-             WHERE ({$1:Int64})\
+             SELECT ss0."id" AS "id",{$0:Bool} AS "smth" FROM "schema1" AS ss0 WHERE {$1:Int64}\
              ),\
              "cte2" AS (\
              SELECT * FROM schema WHERE {$2:Int64}\
@@ -1051,18 +1136,16 @@ defmodule Ecto.Adapters.ClickHouse.ConnectionTest do
              SELECT s0."id",{$3:Int64} FROM "schema" AS s0 \
              INNER JOIN "schema2" AS s1 ON {$4:Bool} \
              INNER JOIN "schema2" AS s2 ON {$5:Bool} \
-             WHERE ({$6:Bool}) AND ({$7:Bool}) \
+             WHERE {$6:Bool} AND {$7:Bool} \
              GROUP BY {$8:Int64},{$9:Int64} \
-             HAVING ({$10:Bool}) AND ({$11:Bool}) \
+             HAVING {$10:Bool} AND {$11:Bool} \
              ORDER BY {$16:Int64} \
              LIMIT {$17:Int64} \
              OFFSET {$18:Int64} \
              UNION DISTINCT \
-             (SELECT s0."id",{$12:Bool} FROM "schema1" AS s0 \
-             WHERE ({$13:Int64})) \
+             (SELECT s0."id",{$12:Bool} FROM "schema1" AS s0 WHERE {$13:Int64}) \
              UNION ALL \
-             (SELECT s0."id",{$14:Bool} FROM "schema2" AS s0 \
-             WHERE ({$15:Int64}))\
+             (SELECT s0."id",{$14:Bool} FROM "schema2" AS s0 WHERE {$15:Int64})\
              """
   end
 
@@ -1074,7 +1157,7 @@ defmodule Ecto.Adapters.ClickHouse.ConnectionTest do
         select: true
       )
 
-    assert all(query) == ~s|SELECT true FROM "schema" AS s0 WHERE (s0."start_time" = "query?")|
+    assert all(query) == ~s|SELECT true FROM "schema" AS s0 WHERE s0."start_time" = "query?"|
   end
 
   test "update_all" do
@@ -1716,7 +1799,7 @@ defmodule Ecto.Adapters.ClickHouse.ConnectionTest do
              FROM schema2 AS s2 \
              WHERE s2.id = s0."x" AND s2.field = {$1:Int64}\
              ) AS f1 ON 1 \
-             WHERE ((s0."id" > 0) AND (s0."id" < {$2:Int64}))\
+             WHERE (s0."id" > 0) AND (s0."id" < {$2:Int64})\
              """
   end
 
@@ -2143,7 +2226,7 @@ defmodule Ecto.Adapters.ClickHouse.ConnectionTest do
     insert = insert(nil, "schema", [:foo, :bar], select, {:raise, [], []}, [])
 
     assert insert ==
-             ~s{INSERT INTO "schema"("foo","bar") SELECT 3,s0."bar" FROM "schema" AS s0 WHERE (1)}
+             ~s{INSERT INTO "schema"("foo","bar") SELECT 3,s0."bar" FROM "schema" AS s0 WHERE 1}
 
     select =
       (s in "schema")

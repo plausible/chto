@@ -48,7 +48,7 @@ defmodule EctoCh.Test do
         |> select([e], e.user_id)
 
       assert all(query) ==
-               {~s[SELECT e0."user_id" FROM "events" AS e0 WHERE (name = {$0:String})], ["John"]}
+               {~s[SELECT e0."user_id" FROM "events" AS e0 WHERE name = {$0:String}], ["John"]}
     end
 
     test "where in" do
