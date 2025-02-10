@@ -7,6 +7,8 @@ defmodule Ecto.Adapters.ClickHouse.ConnectionTest do
 
   import Ecto.Query
   import Ecto.Migration, only: [table: 1, table: 2, index: 3, constraint: 3]
+  require Ecto.Adapters.ClickHouse.API
+  import Ecto.Adapters.ClickHouse.API, only: [with_cte_expression: 3]
 
   defmodule Comment do
     use Ecto.Schema
@@ -231,6 +233,15 @@ defmodule Ecto.Adapters.ClickHouse.ConnectionTest do
              FROM "schema" AS s0 \
              INNER JOIN "tree" AS t1 ON t1."id" = s0."category_id"\
              """
+  end
+
+  test "common table expression with expression instead of subquery" do
+    query =
+      Schema
+      |> with_cte_expression(fragment("123"), as: "value")
+      |> select([], fragment("value"))
+
+    assert all(query) == "WITH 123 AS \"value\" SELECT value FROM \"schema\" AS s0"
   end
 
   test "reference common table in union" do

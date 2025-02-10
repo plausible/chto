@@ -48,4 +48,35 @@ defmodule Ecto.Adapters.ClickHouse.API do
     # %{query | sources: {nil, schema}}
     query
   end
+
+  @doc """
+  Builds a common table expression with an (constant) expression instead of a subquery.
+
+  `with_query` must be a fragment to be evaluated as an expression.
+
+  ## Options
+
+  - as: must be a compile-time literal string that is used in the main query to select
+  the static value.
+
+  https://clickhouse.com/docs/en/sql-reference/statements/select/with#syntax
+  """
+  defmacro with_cte_expression(query, with_query, opts) do
+    name = opts[:as]
+
+    if !name do
+      Ecto.Query.Builder.error!("`as` option must be specified")
+    end
+
+    # :HACK: We override the operation to :update_all to pass context to the connection.
+    # :update_all is not used within ClickHouse adapter otherwise.
+    Ecto.Query.Builder.CTE.build(
+      query,
+      name,
+      with_query,
+      opts[:materialized],
+      :update_all,
+      __CALLER__
+    )
+  end
 end

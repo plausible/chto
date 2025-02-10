@@ -369,8 +369,12 @@ defmodule Ecto.Adapters.ClickHouse.Connection do
     recursive_opt = if recursive, do: "RECURSIVE ", else: ""
 
     ctes =
-      intersperse_map(queries, ?,, fn {name, _opts, cte} ->
-        [quote_name(name), " AS ", cte_query(cte, sources, params, query)]
+      intersperse_map(queries, ?,, fn {name, opts, cte} ->
+        if opts[:operation] == :update_all do
+          [cte_query(cte, sources, params, query), " AS ", quote_name(name)]
+        else
+          [quote_name(name), " AS ", cte_query(cte, sources, params, query)]
+        end
       end)
 
     ["WITH ", recursive_opt, ctes, " "]
