@@ -12,9 +12,7 @@ defmodule Ecto.Adapters.ClickHouse.Structure do
          {:ok, queries} <- File.read(path) do
       multiquery_result =
         queries
-        |> String.split(";", trim: true)
-        |> Enum.map(&String.trim/1)
-        |> Enum.reject(&(&1 == ""))
+        |> @conn.extract_statements()
         |> Enum.reduce_while({:ok, _prev_result = nil, conn}, fn
           query, {:ok, _prev_result, conn} -> {:cont, exec(conn, query)}
           _query, {:error, _reason} = error -> {:halt, error}

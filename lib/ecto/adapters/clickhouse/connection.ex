@@ -1189,4 +1189,162 @@ defmodule Ecto.Adapters.ClickHouse.Connection do
         "Map(Nothing,Nothing)"
     end
   end
+
+  @doc false
+  def extract_statements(statements) when is_binary(statements) do
+    extracted = extract_statements(statements, _from = 0, _len = 0, statements, _acc = [])
+    :lists.reverse(extracted)
+  end
+
+  # we split statements on semicolons, but ...
+  defp extract_statements(<<?;, rest::bytes>>, from, len, original, acc) do
+    acc = extarct_statements_add(binary_part(original, from, len), acc)
+    extract_statements(rest, from + len + 1, 0, original, acc)
+  end
+
+  extract_statements_quotes = %{
+    # https://clickhouse.com/docs/en/sql-reference/syntax#string
+    "single_quote" => ?',
+    # https://clickhouse.com/docs/en/sql-reference/syntax#keywords
+    "double_quote" => ?",
+    "backtick" => ?`
+  }
+
+  # ... we ignore semicolons in quotes ...
+  for {name, codepoint} <- extract_statements_quotes do
+    fun = String.to_atom("extract_statements_exit_#{name}")
+
+    # quoted content begins
+    defp extract_statements(<<unquote(codepoint), rest::bytes>>, from, len, original, acc) do
+      unquote(fun)(rest, from, len + 1, original, acc)
+    end
+
+    # "unquote" is escaped
+    for escape <- [[codepoint, codepoint], [?\\, codepoint]] do
+      defp unquote(fun)(<<unquote_splicing(escape), rest::bytes>>, from, len, original, acc) do
+        unquote(fun)(rest, from, len + 2, original, acc)
+      end
+    end
+
+    # quoted content is over
+    defp unquote(fun)(<<unquote(codepoint), rest::bytes>>, from, len, original, acc) do
+      extract_statements(rest, from, len + 1, original, acc)
+    end
+
+    # quoted content continues
+    defp unquote(fun)(<<_, rest::bytes>>, from, len, original, acc) do
+      unquote(fun)(rest, from, len + 1, original, acc)
+    end
+
+    defp unquote(fun)(<<>>, from, len, original, _acc) do
+      problem_statement = binary_part(original, from, len)
+      raise ArgumentError, "unterminated quote in #{inspect(problem_statement)}"
+    end
+  end
+
+  # https://clickhouse.com/docs/en/sql-reference/syntax#comments
+  extract_statements_line_comments = [
+    [?-, ?-],
+    [?#]
+  ]
+
+  # ... and we ignore semicolons in line comments ...
+  for pattern <- extract_statements_line_comments do
+    # line comment begins
+    defp extract_statements(<<unquote_splicing(pattern), rest::bytes>>, from, len, og, acc) do
+      extract_statements_exit_line_comment(rest, from, len + unquote(length(pattern)), og, acc)
+    end
+
+    # new line is escaped
+    defp extract_statements_exit_line_comment(<<?\\, ?\n, rest::bytes>>, from, len, original, acc) do
+      extract_statements_exit_line_comment(rest, from, len + 2, original, acc)
+    end
+
+    # line comment is over
+    defp extract_statements_exit_line_comment(<<?\n, rest::bytes>>, from, len, og, acc) do
+      extract_statements(rest, from, len + 1, og, acc)
+    end
+
+    # line comment continues
+    defp extract_statements_exit_line_comment(<<_, rest::bytes>>, from, len, original, acc) do
+      extract_statements_exit_line_comment(rest, from, len + 1, original, acc)
+    end
+
+    # unlike quoted strings or block comments, line comments can be unterminated
+    # e.g. select 1; -- comment
+    defp extract_statements_exit_line_comment(<<>>, from, len, original, acc) do
+      extarct_statements_add(binary_part(original, from, len), acc)
+    end
+  end
+
+  # https://clickhouse.com/docs/en/sql-reference/syntax#comments
+  extract_statements_block_comments = [
+    {_starts_with = "/*", _ends_with = "*/"}
+  ]
+
+  # ... and we ignore semicolons in block comments
+  for {started, ended} <- extract_statements_block_comments do
+    start_len = byte_size(started)
+    end_len = byte_size(ended)
+
+    # block comment begins
+    defp extract_statements(<<unquote(started), rest::bytes>>, from, len, og, acc) do
+      # NOTE: block comments can be nested so we track the nesting level
+      extract_statements_exit_block_comment(rest, 0, from, len + unquote(start_len), og, acc)
+    end
+
+    escaped = "\\" <> ended
+
+    # end block is escaped
+    defp extract_statements_exit_block_comment(<<unquote(escaped), r::bytes>>, n, from, l, og, a) do
+      len = l + 1 + unquote(end_len)
+      extract_statements_exit_block_comment(r, n, from, len, og, a)
+    end
+
+    # block comment is over
+    defp extract_statements_exit_block_comment(<<unquote(ended), r::bytes>>, 0, from, l, og, acc) do
+      extract_statements(r, from, l + unquote(end_len), og, acc)
+    end
+
+    # block comment was nested -> not over yet
+    defp extract_statements_exit_block_comment(<<unquote(ended), r::bytes>>, n, from, l, og, acc) do
+      nesting = n - 1
+      len = l + unquote(end_len)
+      extract_statements_exit_block_comment(r, nesting, from, len, og, acc)
+    end
+
+    # block comment within a block comment -> increase nesting
+    defp extract_statements_exit_block_comment(<<unquote(started), r::bytes>>, n, from, l, og, a) do
+      nesting = n + 1
+      len = l + unquote(start_len)
+      extract_statements_exit_block_comment(r, nesting, from, len, og, a)
+    end
+
+    # block comment continues
+    defp extract_statements_exit_block_comment(<<_, rest::bytes>>, n, from, len, og, acc) do
+      extract_statements_exit_block_comment(rest, n, from, len + 1, og, acc)
+    end
+
+    defp extract_statements_exit_block_comment(<<>>, _nesting, from, len, original, _acc) do
+      problem_statement = binary_part(original, from, len)
+      raise ArgumentError, "unterminated block comment in #{inspect(problem_statement)}"
+    end
+  end
+
+  defp extract_statements(<<_, rest::bytes>>, from, len, original, acc) do
+    extract_statements(rest, from, len + 1, original, acc)
+  end
+
+  defp extract_statements(<<>>, from, len, original, acc) do
+    extarct_statements_add(binary_part(original, from, len), acc)
+  end
+
+  # TODO: we don't really need to trim, ClickHouse is fine with whitespace
+  #       and empty statement -- like in select 1; /* empty */ ; select 2; -- is a programmer's mistake
+  defp extarct_statements_add(statement, acc) do
+    case String.trim(statement) do
+      "" -> acc
+      statement -> [statement | acc]
+    end
+  end
 end
